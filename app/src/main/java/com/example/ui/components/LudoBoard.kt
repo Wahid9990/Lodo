@@ -49,7 +49,9 @@ import com.example.model.Token
 fun LudoBoard(
     gameState: GameState,
     onTokenClicked: (tokenId: Int) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isNetworkMode: Boolean = false,
+    myNetworkColor: PlayerColor? = null
 ) {
     BoxWithConstraints(
         modifier = modifier
@@ -123,7 +125,9 @@ fun LudoBoard(
         gameState.players.forEach { player ->
             player.tokens.forEach { token ->
                 val pt = LudoBoardMapper.getGridPoint(token.color, token.relativePosition, token.initialYardIndex)
-                val isMovable = (player.color == activePlayer?.color) && (token.id in movableIds)
+                val isMovable = (player.color == activePlayer?.color) &&
+                        (token.id in movableIds) &&
+                        (!isNetworkMode || player.color == myNetworkColor)
                 tokenLocations.getOrPut(pt) { mutableListOf() }.add(token to isMovable)
             }
         }

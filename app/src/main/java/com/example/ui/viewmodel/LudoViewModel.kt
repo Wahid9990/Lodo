@@ -116,30 +116,49 @@ class LudoViewModel(application: Application) : AndroidViewModel(application) {
         networkManager.joinRoom(roomCodeOrIp, playerName, preferredColor)
     }
 
-    fun startNetworkMatch() {
+    fun startNetworkMatch(
+        requestedPlayerCount: Int = 2,
+        enableAiBots: Boolean = false
+    ) {
         val roomState = networkRoomState.value
         if (!roomState.isHost) return
 
         aiTurnJob?.cancel()
         gameStartTime = System.currentTimeMillis()
 
+        val connectedPlayers = roomState.players.filter { it.isConnected || it.isHost }
+        val pCount = requestedPlayerCount.coerceIn(2, 4)
+
+        val activeColors = when (pCount) {
+            2 -> listOf(PlayerColor.RED, PlayerColor.YELLOW)
+            3 -> listOf(PlayerColor.RED, PlayerColor.GREEN, PlayerColor.YELLOW)
+            else -> listOf(PlayerColor.RED, PlayerColor.GREEN, PlayerColor.YELLOW, PlayerColor.BLUE)
+        }
+
         val pTypes = mutableMapOf<PlayerColor, PlayerType>()
         val pDiffs = mutableMapOf<PlayerColor, AiDifficulty>()
 
-        val playersList = roomState.players.take(4)
-        val pCount = if (playersList.size in 2..4) playersList.size else 4
-
-        playersList.forEach { p ->
-            pTypes[p.color] = p.type
-            pDiffs[p.color] = AiDifficulty.MEDIUM
+        activeColors.forEachIndexed { index, color ->
+            val netP = connectedPlayers.find { it.color == color } ?: connectedPlayers.getOrNull(index)
+            if (netP != null && netP.isConnected) {
+                pTypes[color] = PlayerType.HUMAN
+            } else if (index == 0) { // Host
+                pTypes[color] = PlayerType.HUMAN
+            } else {
+                pTypes[color] = if (enableAiBots) PlayerType.AI else PlayerType.HUMAN
+            }
+            pDiffs[color] = AiDifficulty.MEDIUM
         }
 
         val initial = LudoEngine.createInitialGame(pCount, pTypes, pDiffs).let { base ->
-            // Replace default names with connected player names
             val updatedPlayers = base.players.map { player ->
-                val netP = playersList.find { it.color == player.color }
+                val netP = connectedPlayers.find { it.color == player.color }
                 if (netP != null && netP.name.isNotBlank()) {
-                    player.copy(name = netP.name)
+                    player.copy(name = netP.name, type = PlayerType.HUMAN)
+                } else if (player.color == PlayerColor.RED) {
+                    player.copy(name = roomState.players.firstOrNull()?.name ?: "Host Player", type = PlayerType.HUMAN)
+                } else if (!enableAiBots) {
+                    player.copy(name = "${player.color.displayName} Player", type = PlayerType.HUMAN)
                 } else player
             }
             base.copy(players = updatedPlayers)
@@ -190,14 +209,23 @@ class LudoViewModel(application: Application) : AndroidViewModel(application) {
         val current = _gameState.value
         if (current.isDiceRolled || current.status != GameStatus.IN_PROGRESS || current.isAutoPlaying) return
 
-        // If in network mode and guest client, delegate to networkManager
-        if (_isNetworkMode.value && !networkRoomState.value.isHost) {
+        val active = current.activePlayer ?: return
+
+        // In Network mode: enforce that users can only roll on their own assigned turn
+        if (_isNetworkMode.value) {
             val myColor = _myLocalNetworkColor.value ?: return
-            val active = current.activePlayer
-            if (active != null && active.color == myColor) {
-                networkManager.sendRollDiceAction(myColor)
+            // If active player is human and not my assigned color, ignore touch on this device
+            if (active.type == PlayerType.HUMAN && active.color != myColor) {
+                return
             }
-            return
+
+            // If guest client and it is my turn, send action over network to host
+            if (!networkRoomState.value.isHost) {
+                if (active.color == myColor) {
+                    networkManager.sendRollDiceAction(myColor)
+                }
+                return
+            }
         }
 
         soundManager.playDiceRollSound(_settings.value)
@@ -226,14 +254,23 @@ class LudoViewModel(application: Application) : AndroidViewModel(application) {
         val current = _gameState.value
         if (!current.isDiceRolled || current.status != GameStatus.IN_PROGRESS || current.isAutoPlaying) return
 
-        // If in network mode and guest client, delegate to networkManager
-        if (_isNetworkMode.value && !networkRoomState.value.isHost) {
+        val active = current.activePlayer ?: return
+
+        // In Network mode: enforce that users can only move tokens on their own assigned turn
+        if (_isNetworkMode.value) {
             val myColor = _myLocalNetworkColor.value ?: return
-            val active = current.activePlayer
-            if (active != null && active.color == myColor) {
-                networkManager.sendMoveTokenAction(myColor, tokenId)
+            // If active player is human and not my assigned color, ignore touch on this device
+            if (active.type == PlayerType.HUMAN && active.color != myColor) {
+                return
             }
-            return
+
+            // If guest client and it is my turn, send action over network to host
+            if (!networkRoomState.value.isHost) {
+                if (active.color == myColor) {
+                    networkManager.sendMoveTokenAction(myColor, tokenId)
+                }
+                return
+            }
         }
 
         soundManager.playMoveSound(_settings.value)

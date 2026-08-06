@@ -85,6 +85,9 @@ fun WifiMultiplayerScreen(
     var joinCodeInput by remember { mutableStateOf("") }
     var selectedColor by remember { mutableStateOf(PlayerColor.GREEN) }
 
+    var matchPlayerCount by remember { mutableIntStateOf(2) } // 2, 3, or 4
+    var enableAiBots by remember { mutableStateOf(false) }
+
     val clipboardManager = LocalClipboardManager.current
     var copyNotice by remember { mutableStateOf(false) }
 
@@ -351,11 +354,79 @@ fun WifiMultiplayerScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(24.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Match Settings Selection Card
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = "Game Mode / Active Players",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf(2 to "2 Players", 3 to "3 Players", 4 to "4 Players").forEach { (count, label) ->
+                                    val isSel = matchPlayerCount == count
+                                    Button(
+                                        onClick = { matchPlayerCount = count },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                            contentColor = if (isSel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                        ),
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { enableAiBots = !enableAiBots }
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "AI Bots for Empty Slots",
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 14.sp
+                                    )
+                                    Text(
+                                        text = if (enableAiBots) "Empty slots played by AI" else "No AI (Pure manual turns)",
+                                        fontSize = 12.sp,
+                                        color = Color.Gray
+                                    )
+                                }
+                                androidx.compose.material3.Switch(
+                                    checked = enableAiBots,
+                                    onCheckedChange = { enableAiBots = it }
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
 
                     Button(
                         onClick = {
-                            viewModel.startNetworkMatch()
+                            viewModel.startNetworkMatch(matchPlayerCount, enableAiBots)
                             onStartGame()
                         },
                         modifier = Modifier

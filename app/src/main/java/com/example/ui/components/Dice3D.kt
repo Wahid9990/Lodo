@@ -48,7 +48,8 @@ fun DiceRoller(
     activeColor: PlayerColor,
     isAutoPlaying: Boolean,
     onRollClicked: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isMyTurn: Boolean = true
 ) {
     val rotationAngle by animateFloatAsState(
         targetValue = if (isDiceRolled) 360f else 0f,
@@ -62,6 +63,8 @@ fun DiceRoller(
         PlayerColor.YELLOW -> Color(0xFFFDD835)
         PlayerColor.BLUE -> Color(0xFF1E88E5)
     }
+
+    val isCanRoll = !isDiceRolled && !isAutoPlaying && isMyTurn
 
     Row(
         modifier = modifier
@@ -79,7 +82,7 @@ fun DiceRoller(
                 .clip(RoundedCornerShape(12.dp))
                 .background(Color.White)
                 .border(3.dp, activeColorHex, RoundedCornerShape(12.dp))
-                .clickable(enabled = !isDiceRolled && !isAutoPlaying, onClick = onRollClicked)
+                .clickable(enabled = isCanRoll, onClick = onRollClicked)
                 .testTag("dice_view"),
             contentAlignment = Alignment.Center
         ) {
@@ -91,7 +94,7 @@ fun DiceRoller(
         // Roll Button
         Button(
             onClick = onRollClicked,
-            enabled = !isDiceRolled && !isAutoPlaying,
+            enabled = isCanRoll,
             colors = ButtonDefaults.buttonColors(
                 containerColor = activeColorHex,
                 contentColor = if (activeColor == PlayerColor.YELLOW) Color.Black else Color.White
@@ -110,9 +113,9 @@ fun DiceRoller(
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = if (isDiceRolled) "Dice: $diceValue" else "ROLL DICE",
+                text = if (!isMyTurn) "WAITING FOR TURN..." else if (isDiceRolled) "Dice: $diceValue" else "ROLL DICE",
                 fontWeight = FontWeight.Bold,
-                fontSize = 16.sp
+                fontSize = 15.sp
             )
         }
     }

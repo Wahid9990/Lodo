@@ -77,6 +77,7 @@ fun GameScreen(
 
     val activePlayer = gameState.activePlayer
     val activeColor = activePlayer?.color ?: PlayerColor.RED
+    val isMyTurn = !isNetworkMode || (activePlayer != null && activePlayer.color == myNetworkColor)
 
     Scaffold(
         topBar = {
@@ -143,7 +144,7 @@ fun GameScreen(
                 if (isNetworkMode) {
                     Card(
                         colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer
+                            containerColor = if (isMyTurn) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.tertiaryContainer
                         ),
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.fillMaxWidth()
@@ -153,10 +154,10 @@ fun GameScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "🌐 Local Wi-Fi Match • You are ${myNetworkColor?.displayName ?: "Player"}",
-                                fontSize = 12.sp,
+                                text = if (isMyTurn) "🎲 YOUR TURN (${myNetworkColor?.displayName ?: "Player"}) - Tap dice to roll!" else "⏳ Waiting for ${activePlayer?.name ?: activeColor.displayName}'s turn...",
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                                color = if (isMyTurn) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onTertiaryContainer
                             )
                         }
                     }
@@ -185,6 +186,8 @@ fun GameScreen(
                 LudoBoard(
                     gameState = gameState,
                     onTokenClicked = { tokenId -> viewModel.moveToken(tokenId) },
+                    isNetworkMode = isNetworkMode,
+                    myNetworkColor = myNetworkColor,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 4.dp)
@@ -196,6 +199,7 @@ fun GameScreen(
                     isDiceRolled = gameState.isDiceRolled,
                     activeColor = activeColor,
                     isAutoPlaying = gameState.isAutoPlaying,
+                    isMyTurn = isMyTurn,
                     onRollClicked = { viewModel.rollDice() }
                 )
             }

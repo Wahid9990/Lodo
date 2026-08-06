@@ -1,0 +1,74 @@
+name: Build Debug APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out Repository
+        uses: actions/checkout@v4
+
+      - name: Validate Android Project Structure
+        run: |
+          if [ ! -f gradlew ]; then
+            echo "::error::Gradle wrapper (gradlew) not found in the root directory!"
+            exit 1
+          fi
+          if [ ! -d app ]; then
+            echo "::error::Application module 'app' not found!"
+            exit 1
+          fi
+          if [ ! -f app/build.gradle.kts ]; then
+            echo "::error::Build script 'app/build.gradle.kts' not found!"
+            exit 1
+          fi
+          echo "Android project structure is valid."
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+
+      - name: Clean Stale Build Caches
+        run: |
+          echo "Removing stale project-level Gradle and application build caches..."
+          rm -rf .gradle
+          rm -rf app/build
+
+      - name: Ensure Debug Keystore Exists
+        run: |
+          if [ ! -f debug.keystore ]; then
+            echo "debug.keystore not found, generating a new one..."
+            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          else
+            echo "debug.keystore already exists."
+          fi
+
+      - name: Grant Execute Permission to Gradle Wrapper
+        run: chmod +x gradlew
+
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --stacktrace --no-daemon
+
+      - name: Locate and Verify Generated APK
+        run: |
+          APK_PATH=$(find app/build/outputs/apk/debug/ -name "*.apk" | head -n 1)
+          if [ -z "$APK_PATH" ]; then
+            echo "::error::Error: No APK file was generated in the build output!"
+            exit 1
+          fi
+          echo "Successfully verified APK generation. Found APK at: $APK_PATH"
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-app-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

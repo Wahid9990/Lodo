@@ -1,0 +1,6 @@
+{
+  "name": "Ludo Master",
+  "description": "A modern, responsive Ludo board game featuring PvP, intelligent AI opponents, customizable rules, smooth animations, Room database state persistence, and game statistics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

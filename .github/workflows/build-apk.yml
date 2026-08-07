@@ -1,0 +1,66 @@
+name: Build downloadable debug APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Generate debug keystore
+        run: |
+          keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Grant execute permission for gradlew
+        run: |
+          if [ -f gradlew ]; then
+            chmod +x gradlew
+          else
+            echo "Error: gradlew wrapper not found in root directory!"
+            exit 1
+          fi
+
+      - name: Clean stale caches
+        run: |
+          echo "Removing safe-to-recreate Gradle and build directory caches..."
+          rm -rf .gradle
+          rm -rf app/build
+
+      - name: Build Debug APK
+        run: |
+          ./gradlew assembleDebug --stacktrace --no-daemon
+
+      - name: Locate and Verify generated APK
+        id: locate_apk
+        run: |
+          echo "Searching for generated APK files..."
+          APK_PATH=$(find app/build/outputs/apk/debug/ -name "*.apk" -print -quit)
+          if [ -z "$APK_PATH" ]; then
+            echo "Error: No debug APK files found!"
+            exit 1
+          fi
+          echo "Found APK at: $APK_PATH"
+          echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-app-debug-apk
+          path: ${{ steps.locate_apk.outputs.apk_path }}
+          if-no-files-found: error

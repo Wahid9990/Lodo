@@ -116,6 +116,10 @@ class LudoViewModel(application: Application) : AndroidViewModel(application) {
         networkManager.joinRoom(roomCodeOrIp, playerName, preferredColor)
     }
 
+    fun toggleNetworkSlotType(color: PlayerColor) {
+        networkManager.toggleSlotType(color)
+    }
+
     fun startNetworkMatch(
         requestedPlayerCount: Int = 2,
         enableAiBots: Boolean = false
@@ -139,11 +143,13 @@ class LudoViewModel(application: Application) : AndroidViewModel(application) {
         val pDiffs = mutableMapOf<PlayerColor, AiDifficulty>()
 
         activeColors.forEachIndexed { index, color ->
-            val netP = connectedPlayers.find { it.color == color } ?: connectedPlayers.getOrNull(index)
-            if (netP != null && netP.isConnected) {
+            val roomSlot = roomState.players.find { it.color == color }
+            if (index == 0) { // Host
                 pTypes[color] = PlayerType.HUMAN
-            } else if (index == 0) { // Host
+            } else if (roomSlot != null && roomSlot.isConnected) {
                 pTypes[color] = PlayerType.HUMAN
+            } else if (roomSlot != null && roomSlot.type == PlayerType.AI) {
+                pTypes[color] = PlayerType.AI
             } else {
                 pTypes[color] = if (enableAiBots) PlayerType.AI else PlayerType.HUMAN
             }
@@ -153,13 +159,18 @@ class LudoViewModel(application: Application) : AndroidViewModel(application) {
         val initial = LudoEngine.createInitialGame(pCount, pTypes, pDiffs).let { base ->
             val updatedPlayers = base.players.map { player ->
                 val netP = connectedPlayers.find { it.color == player.color }
+                val roomSlot = roomState.players.find { it.color == player.color }
                 if (netP != null && netP.name.isNotBlank()) {
                     player.copy(name = netP.name, type = PlayerType.HUMAN)
                 } else if (player.color == PlayerColor.RED) {
                     player.copy(name = roomState.players.firstOrNull()?.name ?: "Host Player", type = PlayerType.HUMAN)
+                } else if (roomSlot != null && roomSlot.type == PlayerType.AI) {
+                    player.copy(name = "AI Bot (${player.color.displayName})", type = PlayerType.AI)
                 } else if (!enableAiBots) {
                     player.copy(name = "${player.color.displayName} Player", type = PlayerType.HUMAN)
-                } else player
+                } else {
+                    player.copy(name = "AI Bot (${player.color.displayName})", type = PlayerType.AI)
+                }
             }
             base.copy(players = updatedPlayers)
         }

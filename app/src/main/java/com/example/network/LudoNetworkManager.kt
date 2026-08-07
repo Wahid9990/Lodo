@@ -109,10 +109,34 @@ class LudoNetworkManager(private val context: Context) {
             return "127.0.0.1"
         }
 
+        fun getGatewayIpAddress(context: Context): String? {
+            try {
+                val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+                val dhcpInfo = wifiManager?.dhcpInfo
+                if (dhcpInfo != null && dhcpInfo.gateway != 0) {
+                    val ipInt = dhcpInfo.gateway
+                    return String.format(
+                        "%d.%d.%d.%d",
+                        ipInt and 0xff,
+                        ipInt shr 8 and 0xff,
+                        ipInt shr 16 and 0xff,
+                        ipInt shr 24 and 0xff
+                    )
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+            return null
+        }
+
+        fun isNetworkActive(context: Context): Boolean {
+            val ip = getLocalIpAddress(context)
+            return ip != "127.0.0.1" && ip.isNotBlank()
+        }
+
         fun ipToRoomCode(ip: String): String {
             val parts = ip.split(".")
             if (parts.size == 4) {
-                // E.g., 192.168.43.102 -> 43102 or last two octets formatted
                 val p3 = parts[2].padStart(2, '0')
                 val p4 = parts[3].padStart(3, '0')
                 return "$p3$p4"
@@ -145,14 +169,15 @@ class LudoNetworkManager(private val context: Context) {
             color = PlayerColor.RED,
             name = hostName.ifBlank { "Host (Red)" },
             isHost = true,
-            isConnected = true
+            isConnected = true,
+            type = PlayerType.HUMAN
         )
 
         val initialPlayers = listOf(
             hostInfo,
-            NetworkPlayerInfo(PlayerColor.GREEN, "AI / Waiting...", isHost = false, isConnected = false, type = PlayerType.AI),
-            NetworkPlayerInfo(PlayerColor.YELLOW, "AI / Waiting...", isHost = false, isConnected = false, type = PlayerType.AI),
-            NetworkPlayerInfo(PlayerColor.BLUE, "AI / Waiting...", isHost = false, isConnected = false, type = PlayerType.AI)
+            NetworkPlayerInfo(PlayerColor.GREEN, "Waiting Player 2...", isHost = false, isConnected = false, type = PlayerType.HUMAN),
+            NetworkPlayerInfo(PlayerColor.YELLOW, "Waiting Player 3...", isHost = false, isConnected = false, type = PlayerType.HUMAN),
+            NetworkPlayerInfo(PlayerColor.BLUE, "Waiting Player 4...", isHost = false, isConnected = false, type = PlayerType.HUMAN)
         )
 
         val newState = NetworkRoomState(
@@ -162,14 +187,17 @@ class LudoNetworkManager(private val context: Context) {
             hostIp = localIp,
             myColor = PlayerColor.RED,
             players = initialPlayers,
-            statusMessage = "Room created! Waiting for players to join..."
+            statusMessage = "Room active! Waiting for players to join..."
         )
         _roomState.value = newState
         eventListener?.invoke(NetworkEvent.RoomUpdated(newState))
 
         serverJob = scope.launch {
             try {
-                serverSocket = ServerSocket(PORT)
+                val ss = ServerSocket()
+                ss.reuseAddress = true
+                ss.bind(java.net.InetSocketAddress(PORT))
+                serverSocket = ss
                 while (serverSocket?.isClosed == false) {
                     val client = serverSocket?.accept() ?: break
                     handleIncomingClient(client)
@@ -177,6 +205,23 @@ class LudoNetworkManager(private val context: Context) {
             } catch (e: Exception) {
                 e.printStackTrace()
             }
+        }
+    }
+
+    fun toggleSlotType(color: PlayerColor) {
+        if (!_roomState.value.isHost) return
+        val currentPlayers = _roomState.value.players.toMutableList()
+        val idx = currentPlayers.indexOfFirst { it.color == color }
+        if (idx != -1 && !currentPlayers[idx].isHost && !currentPlayers[idx].isConnected) {
+            val currentSlot = currentPlayers[idx]
+            val newType = if (currentSlot.type == PlayerType.HUMAN) PlayerType.AI else PlayerType.HUMAN
+            val newName = if (newType == PlayerType.AI) "AI Bot" else "Waiting Player ${idx + 1}..."
+            currentPlayers[idx] = currentSlot.copy(type = newType, name = newName)
+
+            val updatedState = _roomState.value.copy(players = currentPlayers)
+            _roomState.value = updatedState
+            eventListener?.invoke(NetworkEvent.RoomUpdated(updatedState))
+            broadcastRoomState(updatedState)
         }
     }
 
@@ -362,12 +407,39 @@ class LudoNetworkManager(private val context: Context) {
         )
 
         clientJob = scope.launch {
+            var activeSocket: Socket? = null
             try {
-                val socket = Socket(targetIp, PORT)
-                clientSocket = socket
+                // Try target IP first with 3500ms timeout
+                val s = Socket()
+                s.reuseAddress = true
+                var connected = false
+                try {
+                    s.connect(java.net.InetSocketAddress(targetIp, PORT), 3500)
+                    connected = true
+                    activeSocket = s
+                } catch (e1: Exception) {
+                    s.close()
+                    // Fallback to Gateway IP if targetIp failed and Gateway IP exists
+                    val gatewayIp = getGatewayIpAddress(context)
+                    if (!gatewayIp.isNullOrBlank() && gatewayIp != targetIp && gatewayIp != "0.0.0.0" && gatewayIp != "127.0.0.1") {
+                        val gwSocket = Socket()
+                        gwSocket.reuseAddress = true
+                        gwSocket.connect(java.net.InetSocketAddress(gatewayIp, PORT), 3500)
+                        connected = true
+                        activeSocket = gwSocket
+                    } else {
+                        throw e1
+                    }
+                }
 
-                val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
-                val writer = PrintWriter(socket.getOutputStream(), true)
+                if (!connected || activeSocket == null) {
+                    throw Exception("Unable to establish connection")
+                }
+
+                clientSocket = activeSocket
+
+                val reader = BufferedReader(InputStreamReader(activeSocket.getInputStream()))
+                val writer = PrintWriter(activeSocket.getOutputStream(), true)
                 hostWriter = writer
 
                 // Send JOIN_REQUEST
@@ -443,6 +515,8 @@ class LudoNetworkManager(private val context: Context) {
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
+                try { activeSocket?.close() } catch (_: Exception) {}
+                clientSocket = null
                 val err = "Failed to connect to room. Check Wi-Fi / Hotspot IP."
                 _roomState.value = _roomState.value.copy(statusMessage = err)
                 eventListener?.invoke(NetworkEvent.Error(err))
@@ -483,16 +557,19 @@ class LudoNetworkManager(private val context: Context) {
         serverJob?.cancel()
         clientJob?.cancel()
 
-        try {
-            serverSocket?.close()
-        } catch (e: Exception) { }
-        try {
-            clientSocket?.close()
-        } catch (e: Exception) { }
-
-        clientSockets.values.forEach { try { it.close() } catch (e: Exception) {} }
-        clientSockets.clear()
-        clientWriters.clear()
+        try { hostWriter?.close() } catch (_: Exception) {}
         hostWriter = null
+
+        clientWriters.values.forEach { try { it.close() } catch (_: Exception) {} }
+        clientWriters.clear()
+
+        clientSockets.values.forEach { try { it.close() } catch (_: Exception) {} }
+        clientSockets.clear()
+
+        try { clientSocket?.close() } catch (_: Exception) {}
+        clientSocket = null
+
+        try { serverSocket?.close() } catch (_: Exception) {}
+        serverSocket = null
     }
 }

@@ -64,8 +64,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.content.Intent
+import android.provider.Settings
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.ui.platform.LocalContext
 import com.example.model.GameStatus
 import com.example.model.PlayerColor
+import com.example.model.PlayerType
+import com.example.network.LudoNetworkManager
 import com.example.ui.viewmodel.LudoViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -75,6 +83,7 @@ fun WifiMultiplayerScreen(
     onBackClick: () -> Unit,
     onStartGame: () -> Unit
 ) {
+    val context = LocalContext.current
     val roomState by viewModel.networkRoomState.collectAsState()
     val gameState by viewModel.gameState.collectAsState()
     val isNetworkMode by viewModel.isNetworkMode.collectAsState()
@@ -90,6 +99,10 @@ fun WifiMultiplayerScreen(
 
     val clipboardManager = LocalClipboardManager.current
     var copyNotice by remember { mutableStateOf(false) }
+
+    val isNetworkConnected = remember(roomState, selectedTab) {
+        LudoNetworkManager.isNetworkActive(context)
+    }
 
     // Auto navigate to game screen when match starts
     LaunchedEffect(gameState.status) {
@@ -195,6 +208,54 @@ fun WifiMultiplayerScreen(
 
             if (selectedTab == 0) {
                 // --- HOST ROOM SECTION ---
+                if (!isNetworkConnected) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "⚠️ Hotspot / Wi-Fi is Disabled!",
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                fontSize = 15.sp
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Please enable Personal Hotspot or connect to Wi-Fi so other players can join.",
+                                fontSize = 12.sp,
+                                textAlign = TextAlign.Center,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedButton(
+                                onClick = {
+                                    try {
+                                        val intent = Intent("android.settings.TETHER_SETTING")
+                                        context.startActivity(intent)
+                                    } catch (e: Exception) {
+                                        val intent = Intent(Settings.ACTION_WIRELESS_SETTINGS)
+                                        context.startActivity(intent)
+                                    }
+                                },
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            ) {
+                                Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("OPEN HOTSPOT SETTINGS", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
@@ -303,8 +364,8 @@ fun WifiMultiplayerScreen(
 
                     // Connected Players Header
                     Text(
-                        text = "Connected Players (2–4)",
-                        fontSize = 16.sp,
+                        text = "Room Player Slots (Tap open slot to toggle AI/Human)",
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -312,10 +373,18 @@ fun WifiMultiplayerScreen(
 
                     // Players List Cards
                     roomState.players.forEach { player ->
+                        val isOpenSlot = !player.isHost && !player.isConnected
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 4.dp),
+                                .padding(vertical = 4.dp)
+                                .then(
+                                    if (isOpenSlot) {
+                                        Modifier.clickable {
+                                            viewModel.toggleNetworkSlotType(player.color)
+                                        }
+                                    } else Modifier
+                                ),
                             shape = RoundedCornerShape(12.dp)
                         ) {
                             Row(
@@ -338,7 +407,10 @@ fun WifiMultiplayerScreen(
                                         fontSize = 15.sp
                                     )
                                     Text(
-                                        text = if (player.isHost) "Host Device" else if (player.isConnected) "Connected Player" else "AI Bot (Slot Open)",
+                                        text = if (player.isHost) "Host Device"
+                                        else if (player.isConnected) "Connected Human Player"
+                                        else if (player.type == PlayerType.AI) "🤖 AI Bot (Tap to change)"
+                                        else "👤 Reserved for Human (Tap to change)",
                                         fontSize = 12.sp,
                                         color = if (player.isConnected) MaterialTheme.colorScheme.primary else Color.Gray
                                     )
@@ -348,6 +420,12 @@ fun WifiMultiplayerScreen(
                                         Icons.Default.CheckCircle,
                                         contentDescription = "Ready",
                                         tint = Color(0xFF43A047)
+                                    )
+                                } else if (isOpenSlot) {
+                                    Icon(
+                                        if (player.type == PlayerType.AI) Icons.Default.SmartToy else Icons.Default.Person,
+                                        contentDescription = "Toggle Slot",
+                                        tint = MaterialTheme.colorScheme.primary
                                     )
                                 }
                             }
@@ -444,6 +522,54 @@ fun WifiMultiplayerScreen(
                 }
             } else {
                 // --- JOIN ROOM SECTION ---
+                if (!isNetworkConnected) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "⚠️ Wi-Fi is Disabled!",
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                fontSize = 15.sp
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Please turn on Wi-Fi and connect to Host's Personal Hotspot or Wi-Fi network.",
+                                fontSize = 12.sp,
+                                textAlign = TextAlign.Center,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedButton(
+                                onClick = {
+                                    try {
+                                        val intent = Intent(Settings.ACTION_WIFI_SETTINGS)
+                                        context.startActivity(intent)
+                                    } catch (e: Exception) {
+                                        val intent = Intent(Settings.ACTION_WIRELESS_SETTINGS)
+                                        context.startActivity(intent)
+                                    }
+                                },
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            ) {
+                                Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("OPEN WI-FI SETTINGS", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
